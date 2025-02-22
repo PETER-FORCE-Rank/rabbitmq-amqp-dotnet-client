@@ -1,0 +1,301 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+# This workflow will build, test, sign and package a WPF or Windows Forms desktop application
+# built on .NET Core.
+# To learn how to migrate your existing application to .NET Core,
+# refer to https://docs.microsoft.com/en-us/dotnet/desktop-wpf/migration/convert-project-from-net-framework
+#
+# To configure this workflow:
+#
+# 1. Configure environment variables
+# GitHub sets default environment variables for every workflow run.
+# Replace the variables relative to your project in the "env" section below.
+#
+# 2. Signing
+# Generate a signing certificate in the Windows Application
+# Packaging Project or add an existing signing certificate to the project.
+# Next, use PowerShell to encode the .pfx file using Base64 encoding
+# by running the following Powershell script to generate the output string:
+#
+# $pfx_cert = Get-Content '.\SigningCertificate.pfx' -Encoding Byte
+# [System.Convert]::ToBase64String($pfx_cert) | Out-File 'SigningCertificate_Encoded.txt'
+#
+# Open the output file, SigningCertificate_Encoded.txt, and copy the
+# string inside. Then, add the string to the repo as a GitHub secret
+# and name it "Base64_Encoded_Pfx."
+# For more information on how to configure your signing certificate for
+# this workflow, refer to https://github.com/microsoft/github-actions-for-desktop-apps#signing
+#
+# Finally, add the signing certificate password to the repo as a secret and name it "Pfx_Key".
+# See "Build the Windows Application Packaging project" below to see how the secret is used.
+#
+# For more information on GitHub Actions, refer to https://github.com/features/actions
+# For a complete CI/CD sample to get started with GitHub Action workflows for Desktop Applications,
+# refer to https://github.com/microsoft/github-actions-for-desktop-apps
+
+name: .NET Core Desktop
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+
+  build:
+
+    strategy:
+      matrix:
+        configuration: [Debug, Release]
+
+    runs-on: windows-latest  # For a list of available runner types, refer to
+                             # https://help.github.com/en/actions/reference/workflow-syntax-for-github-actions#jobsjob_idruns-on
+
+    env:
+      Solution_Name: your-solution-name                         # Replace with your solution name, i.e. MyWpfApp.sln.
+      Test_Project_Path: your-test-project-path                 # Replace with the path to your test project, i.e. MyWpfApp.Tests\MyWpfApp.Tests.csproj.
+      Wap_Project_Directory: your-wap-project-directory-name    # Replace with the Wap project directory relative to the solution, i.e. MyWpfApp.Package.
+      Wap_Project_Path: your-wap-project-path                   # Replace with the path to your Wap project, i.e. MyWpf.App.Package\MyWpfApp.Package.wapproj.
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    # Install the .NET Core workload
+    - name: Install .NET Core
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+
+    # Add  MSBuild to the PATH: https://github.com/microsoft/setup-msbuild
+    - name: Setup MSBuild.exe
+      uses: microsoft/setup-msbuild@v2
+
+    # Execute all unit tests in the solution
+    - name: Execute unit tests
+      run: dotnet test
+
+    # Restore the application to populate the obj folder with RuntimeIdentifiers
+    - name: Restore the application
+      run: msbuild $env:Solution_Name /t:Restore /p:Configuration=$env:Configuration
+      env:
+        Configuration: ${{ matrix.configuration }}
+
+    # Decode the base 64 encoded pfx and save the Signing_Certificate
+    - name: Decode the pfx
+      run: |
+        $pfx_cert_byte = [System.Convert]::FromBase64String("${{ secrets.Base64_Encoded_Pfx }}")
+        $certificatePath = Join-Path -Path $env:Wap_Project_Directory -ChildPath GitHubActionsWorkflow.pfx
+        [IO.File]::WriteAllBytes("$certificatePath", $pfx_cert_byte)
+
+    # Create the app package by building and packaging the Windows Application Packaging project
+    - name: Create the app package
+      run: msbuild $env:Wap_Project_Path /p:Configuration=$env:Configuration /p:UapAppxPackageBuildMode=$env:Appx_Package_Build_Mode /p:AppxBundle=$env:Appx_Bundle /p:PackageCertificateKeyFile=GitHubActionsWorkflow.pfx /p:PackageCertificatePassword=${{ secrets.Pfx_Key }}
+      env:
+        Appx_Bundle: Always
+        Appx_Bundle_Platforms: x86|x64
+        Appx_Package_Build_Mode: StoreUpload
+        Configuration: ${{ matrix.configuration }}
+
+    # Remove the pfx
+    - name: Remove the pfx
+      run: Remove-Item -path $env:Wap_Project_Directory\GitHubActionsWorkflow.pfx
+
+    # Upload the MSIX package: https://github.com/marketplace/actions/upload-a-build-artifact
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: MSIX Package
+        path: ${{ env.Wap_Project_Directory }}\AppPackages
+
+            - name: Deploy to IBM Cloud Foundry
+  # You may pin to the exact commit or the version.
+  # uses: IBM/cloudfoundry-deploy@fcb5a74cb36e7cd0bfe9f9b5d9d57aab85d00bd1
+  uses: IBM/cloudfoundry-deploy@v2.1
+  with:
+    # IBM Cloud API key
+    IBM_CLOUD_API_KEY: 
+    # IBM Cloud Foundry API endpoint
+    IBM_CLOUD_CF_API: 
+    # IBM Cloud Foundry organization name
+    IBM_CLOUD_CF_ORG: 
+    # IBM Cloud Foundry space name
+    IBM_CLOUD_CF_SPACE: 
+    # App Manifest file
+    APP_MANIFEST_FILE: # optional, default is manifest.yml
+    # App variables file
+    APP_VARS_FILE: # optional
+    # IBM Cloud Foundry resource group
+    RESOURCE_GROUP: # optional
+
+            - name: Azure App Service Settings for Node20
+  # You may pin to the exact commit or the version.
+  # uses: devops-actions/azure-appservice-settings@20208b95c9bb6792d9d90c375f5b830d37d4e3b8
+  uses: devops-actions/azure-appservice-settings@v1
+  with:
+    # Name of the Azure Web App
+    app-name: 
+    # Name of an existing slot other than the production slot. Default value is production
+    slot-name: # optional
+    # Application settings using the JSON syntax set as value of secret variable: APP_SETTINGS
+    app-settings-json: # optional
+    # Connection Strings using the JSON syntax set as value of secret variable: CONNECTION_STRINGS
+    connection-strings-json: # optional
+    # General configuration settings using dictionary syntax - Key Value pairs
+    general-settings-json: # optional
+    # Set it to false if you want to provide input jsons as plain text/you do not want input json values to be masked. This will apply to app-settings-json and connection-strings-json. Default is true
+    mask-inputs: # optional, default is true
+
+
+            - name: Publish event
+  # You may pin to the exact commit or the version.
+  # uses: fiberplane/publish-event@63e125ddca44bfb308eec949bcb22f80230394b0
+  uses: fiberplane/publish-event@v1.2
+  with:
+    # API token used to access the Fiberplane API with
+    api-token: 
+    # Title of the newly created event
+    title: # default is GitHub Action
+    # Labels to add to the event.
+Format: key=value|key=value|key=value
+
+    labels: 
+    # Time at which the event occurred. Defaults to current time. Format should be a RFC 3339 formatted string
+    time: # optional
+    # ID of the workspace to which the event should be posted
+    workspace-id: 
+    # Base URL of the Fiberplane API
+    fp-base-url: # default is https://studio.fiberplane.com
+
+            - name: Create NuGet Package for Octopus Deploy
+  # You may pin to the exact commit or the version.
+  # uses: OctopusDeploy/create-nuget-package-action@64e3cec8f57c50b3e7cdfabd006e4d1a24b94f4d
+  uses: OctopusDeploy/create-nuget-package-action@v3.0.2
+  with:
+    # Package Id.
+    package_id: 
+    # Package version.
+    version: 
+    # The folder to put the resulting package in, relative to the current working directory; not the base path.
+    output_folder: 
+    # The base path for the input files.
+    base_path: 
+    # Multi-line list of files to include in the package. Supports globbing.
+    files: 
+    # Description to include in the Nuspec file. 
+    nuspec_description: 
+    # Multi-line list of authors to include in the Nuspec file.
+    nuspec_authors: 
+    # Release notes to include in the Nuspec file.
+    nuspec_release_notes: # optional
+            - name: Code Engine GitHub Action
+  # You may pin to the exact commit or the version.
+  # uses: IBM/code-engine-github-action@e7fd12ef5fd7ef8652286e9e800b2c226b393264
+  uses: IBM/code-engine-github-action@v1.0.0
+  with:
+    # IAM API Key used to log into the IBM Cloud
+    api-key: 
+    # An IBM Cloud Resource Group is a logical container used to organize and manage related cloud resources
+    resource-group: # optional
+    # The Region refers to a geographical area where the project is are located
+    region: 
+    # A Code Engine Project Is the grouping of your Apps, Functions and Jobs
+    project: 
+    # The type of component that should be deployed [App, Function, Job]
+    component: 
+    # Name of the App, Function or Job
+    name: 
+    # Runtime used for the Function only required for function
+    runtime: # optional
+    # path to the directory containing the source code
+    build-source: # optional, default is .
+    # CPU configuration set for the component. If not set default Code Engine values are used.
+    cpu: # optional
+    # Memory configuration set for the component. If not set default Code Engine values are used.
+    memory: # optional
+
+
+                      - name: Azure Resource Manager (ARM) Template Deployment
+  # You may pin to the exact commit or the version.
+  # uses: whiteducksoftware/azure-arm-action@9bae2e95df87dbd4acae11deb0765be7256fd141
+  uses: whiteducksoftware/azure-arm-action@v3.3
+  with:
+    # Paste output of `az ad sp create-for-rbac -o json` as value of secret variable: AZURE_CREDENTIALS
+    creds: 
+    # Provide the name of a resource group.
+    resourceGroupName: 
+    # Specify the path to the Azure Resource Manager template.
+    templateLocation: 
+    # Specifies the name of the resource group deployment to create.
+    deploymentName: 
+    # Incremental (only add resources to resource group) or Complete (remove extra resources from resource group).
+    deploymentMode: # optional, default is Incremental
+    # Specify either path to the Azure Resource Manager parameters file or pass them as 'key1=value1;key2=value2;...'.
+    parameters: # optional
+    # Specify either path to the Azure Resource Manager override parameters file or pass them as 'key1=value1;key2=value2;...'.
+    overrideParameters: # optional
+
+    
+          
+            - name: Create Cloud Deploy Release
+  # You may pin to the exact commit or the version.
+  # uses: google-github-actions/create-cloud-deploy-release@1837c81cb1f344e7325b0934d965f7e5e16c01f5
+  uses: google-github-actions/create-cloud-deploy-release@v1
+  with:
+    # The name of the release.
+    name: 
+    # The delivery pipeline to use for the release.
+    delivery_pipeline: 
+    # Region in which the delivery pipeline can be found.
+    region: # optional
+    # The location of the files to be included in the release.
+    source: # optional
+    # Path to a Skaffold output file containing the details of the image(s) to be released.
+    build_artifacts: # optional
+    # The images to be released.
+    images: # optional
+    # Prevent the release being deployed to the first target in the delivery pipeline.
+    disable_initial_rollout: # optional
+    # A directory in Google Cloud Storage to copy the source used for staging the build.
+    gcs_source_staging_dir: # optional
+    # Path of the skaffold file absolute or relative to the source directory.
+    skaffold_file: # optional
+    # Add additional annotations to the release.
+    annotations: # optional
+    # Add additional labels to the release.
+    labels: # optional
+    # Include a description of the release.
+    description: # optional
+    # Additional parameters to supply at release creation time.
+    deploy_parameters: # optional
+    # The Google Cloud Project ID. If unset, this is inherited from the environment.
+    project_id: # optional
+    # Space separated list of other Cloud Deploy flags, examples can be found:
+https://cloud.google.com/sdk/gcloud/reference/deploy/releases/create#FLAGS
+Example: '--from-k8s-manifest=manifest.yaml --skaffold-version=skaffold_preview'
+    flags: # optional
+    # Version of the Cloud SDK to install. If unspecified or set to "latest",
+the latest available gcloud SDK version for the target platform will be
+installed. Example: "290.0.1".
+    gcloud_version: # optional
+    # Version of the Cloud SDK components to install and use. If unspecified, the latest
+or released version will be used. This is the equivalent of running
+'gcloud alpha run' or 'gcloud beta run'. Valid values are `alpha` or `beta`.
+    gcloud_component: # optional
+
+
+          
+
+
+
+          
+
+          
+          
+        
